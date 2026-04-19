@@ -11,14 +11,25 @@ class CollaborationRepository extends BaseRepository {
   async getPendingForUser(userId, options = {}) {
     return this.findMany(
       { invitee_id: userId, status: 'pending' },
-      { ...options, sort: { created_at: -1 }, populate: [{ path: 'inviter_id', select: 'username display_name avatar_url' }] }
+      {
+        ...options,
+        sort: { created_at: -1 },
+        populate: [{ path: 'inviter_id', select: 'username display_name avatar_url is_verified' }],
+      }
     );
   }
 
   async getUserCollaborations(userId, status, options = {}) {
     const filter = { $or: [{ inviter_id: userId }, { invitee_id: userId }] };
     if (status) filter.status = status;
-    return this.findMany(filter, { ...options, sort: { created_at: -1 } });
+    return this.findMany(filter, {
+      ...options,
+      sort: { created_at: -1 },
+      populate: [
+        { path: 'inviter_id', select: 'username display_name avatar_url is_verified' },
+        { path: 'invitee_id', select: 'username display_name avatar_url is_verified' },
+      ],
+    });
   }
 }
 

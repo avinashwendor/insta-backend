@@ -1,8 +1,23 @@
+const mongoose = require('mongoose');
 const BaseRepository = require('./base.repository');
 const Comment = require('../models/Comment');
 const Like = require('../models/Like');
 const Save = require('../models/Save');
 const Share = require('../models/Share');
+const { PAGINATION } = require('../config/constants');
+
+/** Coerce string ids to ObjectIds for `$in` queries on engagement targets. */
+function toObjectIdList(ids) {
+  if (!ids?.length) return [];
+  const out = [];
+  for (const id of ids) {
+    const s = String(id);
+    if (mongoose.Types.ObjectId.isValid(s)) {
+      out.push(new mongoose.Types.ObjectId(s));
+    }
+  }
+  return out;
+}
 
 // ─── Comment Repository ──────────────────────────────────────
 
@@ -109,6 +124,28 @@ class LikeRepository extends BaseRepository {
       }
     );
   }
+
+  /**
+   * Batch: likes by this user for many targets (feed / explore hydration).
+   */
+  async findLikesByUserForTargets(userId, targetType, targetIds) {
+    const oidList = toObjectIdList(targetIds);
+    if (!oidList.length) return [];
+    const limit = Math.min(oidList.length, PAGINATION.MAX_LIMIT);
+    const { data } = await this.findMany(
+      {
+        user_id: userId,
+        target_type: targetType,
+        target_id: { $in: oidList },
+      },
+      {
+        limit,
+        sort: { created_at: -1 },
+        select: 'target_id',
+      },
+    );
+    return data;
+  }
 }
 
 // ─── Save Repository ─────────────────────────────────────────
@@ -135,6 +172,28 @@ class SaveRepository extends BaseRepository {
   }
 
   /**
+   * Batch: saves by this user for many targets (feed / explore hydration).
+   */
+  async findSavesByUserForTargets(userId, targetType, targetIds) {
+    const oidList = toObjectIdList(targetIds);
+    if (!oidList.length) return [];
+    const limit = Math.min(oidList.length, PAGINATION.MAX_LIMIT);
+    const { data } = await this.findMany(
+      {
+        user_id: userId,
+        target_type: targetType,
+        target_id: { $in: oidList },
+      },
+      {
+        limit,
+        sort: { created_at: -1 },
+        select: 'target_id',
+      },
+    );
+    return data;
+  }
+
+  /**
    * Get all saved items for a user, optionally filtered by collection.
    */
   async getUserSaves(userId, collectionName, options = {}) {
@@ -153,6 +212,20 @@ class SaveRepository extends BaseRepository {
    */
   async getUserCollections(userId) {
     return this.model.distinct('collection_name', { user_id: userId });
+  }
+
+  /**
+   * Collection names with save counts (for Saved → Collections UI).
+   */
+  async getCollectionSummaries(userId) {
+    const names = (await this.model.distinct('collection_name', { user_id: userId })).filter(Boolean);
+    const summaries = await Promise.all(
+      names.map(async (name) => ({
+        name,
+        count: await this.countDocuments({ user_id: userId, collection_name: name }),
+      })),
+    );
+    return summaries.sort((a, b) => a.name.localeCompare(b.name));
   }
 }
 

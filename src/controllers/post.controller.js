@@ -36,7 +36,7 @@ const getFeed = asyncHandler(async (req, res) => {
 });
 
 const getExplore = asyncHandler(async (req, res) => {
-  const { data, meta } = await postService.getExplore({
+  const { data, meta } = await postService.getExplore(req.user.id, {
     cursor: req.query.cursor,
     limit: req.query.limit,
   });

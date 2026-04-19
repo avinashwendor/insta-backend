@@ -1,6 +1,6 @@
 /**
  * Database seed script.
- * Creates initial admin user, membership tiers, and sample hashtags.
+ * Creates initial admin user, a regular demo user, membership tiers, and sample hashtags.
  *
  * Usage: node src/scripts/seed.js
  */
@@ -38,6 +38,32 @@ const seedAdmin = async () => {
   await UserSetting.create({ user_id: admin._id });
 
   logger.info(`Admin user created: admin@instayt.com / Admin@1234`);
+};
+
+/** Standard personal account for testing the app as a normal user (not admin). */
+const seedDemoUser = async () => {
+  const existing = await User.findOne({ username: 'demouser' });
+  if (existing) {
+    logger.info('Demo user already exists, skipping...');
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash('User@1234', config.bcrypt.saltRounds);
+
+  const user = await User.create({
+    username: 'demouser',
+    email: 'user@instayt.com',
+    display_name: 'Demo User',
+    password_hash: passwordHash,
+    account_type: 'personal',
+    is_verified: false,
+    date_of_birth: new Date('1995-06-15'),
+    bio: 'Seeded personal account for development and QA.',
+  });
+
+  await UserSetting.create({ user_id: user._id });
+
+  logger.info('Demo user created: demouser (or user@instayt.com) / User@1234');
 };
 
 const seedMembershipTiers = async () => {
@@ -128,6 +154,7 @@ const run = async () => {
     logger.info('Starting database seed...');
 
     await seedAdmin();
+    await seedDemoUser();
     await seedMembershipTiers();
     await seedHashtags();
 

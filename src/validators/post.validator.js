@@ -1,6 +1,12 @@
 const Joi = require('joi');
 const { VISIBILITY_OPTIONS, POST_TYPES } = require('../config/constants');
 
+const locationObjectSchema = Joi.object({
+  name: Joi.string().max(200),
+  lat: Joi.number().min(-90).max(90),
+  lng: Joi.number().min(-180).max(180),
+});
+
 const createPost = {
   body: Joi.object({
     caption: Joi.string().max(2200).allow('').default(''),
@@ -10,11 +16,22 @@ const createPost = {
     visibility: Joi.string()
       .valid(...Object.values(VISIBILITY_OPTIONS))
       .default('public'),
-    location: Joi.object({
-      name: Joi.string().max(200),
-      lat: Joi.number().min(-90).max(90),
-      lng: Joi.number().min(-180).max(180),
-    }),
+    // Multipart sends JSON fields as strings — accept either shape.
+    location: Joi.alternatives()
+      .try(
+        locationObjectSchema,
+        Joi.string().custom((val, helpers) => {
+          try {
+            const parsed = JSON.parse(val);
+            const { error, value } = locationObjectSchema.validate(parsed, { abortEarly: false });
+            if (error) return helpers.error('any.invalid');
+            return value;
+          } catch {
+            return helpers.error('any.invalid');
+          }
+        }, 'location json'),
+      )
+      .optional(),
     collaborators: Joi.array().items(
       Joi.object({
         user_id: Joi.string().required(),

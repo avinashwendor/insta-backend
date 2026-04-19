@@ -1,22 +1,35 @@
+const mongoose = require('mongoose');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 const { conversationRepository, messageRepository } = require('../repositories/chat.repository');
 
-const createConversation = async (userId, { type, participant_ids, group_name, initial_message }) => {
-  const allParticipantIds = [userId, ...participant_ids.filter((id) => id !== userId)];
+const toComparableId = (id) => (id?.toString?.() ?? String(id));
 
-  // For DMs, check if conversation already exists
+const createConversation = async (userId, { type, participant_ids, group_name, initial_message }) => {
+  const uidStr = toComparableId(userId);
+  const others = (participant_ids || [])
+    .map((id) => toComparableId(id))
+    .filter((id) => id && id !== uidStr);
+
+  // For DMs, check if conversation already exists (normalize IDs so lookup always hits).
   if (type === 'dm') {
-    if (participant_ids.length !== 1) {
+    if (!participant_ids || participant_ids.length !== 1) {
       throw ApiError.badRequest('DM conversations require exactly one other participant');
     }
-    const existing = await conversationRepository.findDmBetween(userId, participant_ids[0]);
+    if (others.length !== 1) {
+      throw ApiError.badRequest('Cannot start a DM with yourself');
+    }
+    const existing = await conversationRepository.findDmBetween(uidStr, others[0]);
     if (existing) return existing;
   }
 
+  const userOid = mongoose.Types.ObjectId.isValid(uidStr) ? new mongoose.Types.ObjectId(uidStr) : userId;
+  const otherOids = others.map((s) => (mongoose.Types.ObjectId.isValid(s) ? new mongoose.Types.ObjectId(s) : s));
+  const allParticipantIds = [userOid, ...otherOids];
+
   const participants = allParticipantIds.map((id) => ({
     user_id: id,
-    role: id === userId && type === 'group' ? 'admin' : 'member',
+    role: toComparableId(id) === uidStr && type === 'group' ? 'admin' : 'member',
   }));
 
   const conversation = await conversationRepository.create({
@@ -76,7 +89,8 @@ const sendMessage = async (convId, userId, messageData) => {
   const previewText = messageData.content.text || `[${messageData.type}]`;
   await conversationRepository.updateLastMessage(convId, previewText, userId);
 
-  return messageRepository.findById(message._id);
+  const populated = await messageRepository.findByIdWithSender(message._id);
+  return populated ?? message;
 };
 
 const deleteMessage = async (msgId, userId) => {

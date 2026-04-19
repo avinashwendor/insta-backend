@@ -119,6 +119,29 @@ const getPost = async (postId, currentUserId) => {
 };
 
 /**
+ * Attach is_liked / is_saved for the current user to each post (feed & explore).
+ */
+const attachUserEngagementToPosts = async (posts, userId) => {
+  if (!userId || !posts?.length) return posts;
+  const ids = posts.map((p) => String(p._id));
+  const [likeRows, saveRows] = await Promise.all([
+    likeRepository.findLikesByUserForTargets(userId, 'post', ids),
+    saveRepository.findSavesByUserForTargets(userId, 'post', ids),
+  ]);
+  const liked = new Set(likeRows.map((r) => String(r.target_id)));
+  const saved = new Set(saveRows.map((r) => String(r.target_id)));
+  return posts.map((post) => {
+    const id = String(post._id);
+    const base = typeof post.toObject === 'function' ? post.toObject() : { ...post };
+    return {
+      ...base,
+      is_liked: liked.has(id),
+      is_saved: saved.has(id),
+    };
+  });
+};
+
+/**
  * Update a post (only by the author).
  */
 const updatePost = async (postId, userId, updateData) => {
@@ -195,14 +218,18 @@ const getFeed = async (userId, { cursor, limit }) => {
   const followingIds = await followerRepository.getFollowingIds(userId);
   // Include own posts in feed
   followingIds.push(userId);
-  return postRepository.getFeedPosts(followingIds, { cursor, limit });
+  const page = await postRepository.getFeedPosts(followingIds, { cursor, limit });
+  page.data = await attachUserEngagementToPosts(page.data, userId);
+  return page;
 };
 
 /**
  * Get explore/discover posts.
  */
-const getExplore = async ({ cursor, limit }) => {
-  return postRepository.getExplorePosts({ cursor, limit });
+const getExplore = async (userId, { cursor, limit }) => {
+  const page = await postRepository.getExplorePosts({ cursor, limit });
+  page.data = await attachUserEngagementToPosts(page.data, userId);
+  return page;
 };
 
 /**

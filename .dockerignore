@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.md
+coverage
+.nyc_output
+.DS_Store
+deploy
+scripts
+nodemon.json
+.eslintrc*
+eslint.config.*

@@ -36,7 +36,7 @@ const getReelsFeed = asyncHandler(async (req, res) => {
 });
 
 const getTrendingReels = asyncHandler(async (req, res) => {
-  const { data, meta } = await reelService.getTrendingReels({
+  const { data, meta } = await reelService.getTrendingReels(req.user.id, {
     cursor: req.query.cursor,
     limit: req.query.limit,
   });

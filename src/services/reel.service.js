@@ -90,6 +90,29 @@ const getReel = async (reelId, currentUserId) => {
 };
 
 /**
+ * Attach is_liked / is_saved for the current user to each reel (list endpoints).
+ */
+const attachUserEngagementToReels = async (reels, userId) => {
+  if (!userId || !reels?.length) return reels;
+  const ids = reels.map((r) => String(r._id));
+  const [likeRows, saveRows] = await Promise.all([
+    likeRepository.findLikesByUserForTargets(userId, 'reel', ids),
+    saveRepository.findSavesByUserForTargets(userId, 'reel', ids),
+  ]);
+  const liked = new Set(likeRows.map((r) => String(r.target_id)));
+  const saved = new Set(saveRows.map((r) => String(r.target_id)));
+  return reels.map((reel) => {
+    const id = String(reel._id);
+    const base = typeof reel.toObject === 'function' ? reel.toObject() : { ...reel };
+    return {
+      ...base,
+      is_liked: liked.has(id),
+      is_saved: saved.has(id),
+    };
+  });
+};
+
+/**
  * Update a reel.
  */
 const updateReel = async (reelId, userId, updateData) => {
@@ -140,21 +163,27 @@ const deleteReel = async (reelId, userId) => {
 const getReelsFeed = async (userId, { cursor, limit }) => {
   const followingIds = await followerRepository.getFollowingIds(userId);
   followingIds.push(userId);
-  return reelRepository.getFeedReels(followingIds, { cursor, limit });
+  const page = await reelRepository.getFeedReels(followingIds, { cursor, limit });
+  page.data = await attachUserEngagementToReels(page.data, userId);
+  return page;
 };
 
 /**
  * Get trending reels.
  */
-const getTrendingReels = async ({ cursor, limit }) => {
-  return reelRepository.getTrendingReels({ cursor, limit });
+const getTrendingReels = async (userId, { cursor, limit }) => {
+  const page = await reelRepository.getTrendingReels({ cursor, limit });
+  page.data = await attachUserEngagementToReels(page.data, userId);
+  return page;
 };
 
 /**
  * Get personalized "for you" feed.
  */
 const getForYouReels = async (userId, { cursor, limit }) => {
-  return reelRepository.getForYouReels([userId], { cursor, limit });
+  const page = await reelRepository.getForYouReels([userId], { cursor, limit });
+  page.data = await attachUserEngagementToReels(page.data, userId);
+  return page;
 };
 
 /**

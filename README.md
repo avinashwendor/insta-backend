@@ -119,6 +119,10 @@ const socket = io('http://localhost:3000', {
 
 See [.env.example](.env.example) for all required variables.
 
+## Deploying to AWS
+
+Use the **`Dockerfile`** in this directory, then follow **[deploy/aws/README.md](deploy/aws/README.md)** for ECR, ECS on Fargate, Application Load Balancer, health checks (`GET /api/v1/health`), and production environment variables. Helper script: **`deploy/aws/build-and-push.sh`**.
+
 ## License
 
 ISC
