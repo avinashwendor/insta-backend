@@ -121,7 +121,12 @@ See [.env.example](.env.example) for all required variables.
 
 ## Deploying to AWS
 
-Use the **`Dockerfile`** in this directory, then follow **[deploy/aws/README.md](deploy/aws/README.md)** for ECR, ECS on Fargate, Application Load Balancer, health checks (`GET /api/v1/health`), and production environment variables. Helper script: **`deploy/aws/build-and-push.sh`**.
+- **Upload code (no Docker):** **[deploy/aws/elastic-beanstalk.md](deploy/aws/elastic-beanstalk.md)** — zip the `backend` project, upload to **Elastic Beanstalk**, set env vars, done. Uses root **`Procfile`**.
+- **Containers:** **[deploy/aws/README.md](deploy/aws/README.md)** — **Dockerfile**, **ECR**, **ECS Fargate**, **ALB**. Helper: **`deploy/aws/build-and-push.sh`**.
+
+## Deploying like Vercel (Railway, Render, etc.)
+
+**Vercel** is a poor fit for *this* app as-is (serverless, not one long-lived Node + Socket.IO process). **Railway, Render, Fly.io,** and similar **PaaS** web services work with minimal changes. See **[deploy/paas.md](deploy/paas.md)**.
 
 ## License
 

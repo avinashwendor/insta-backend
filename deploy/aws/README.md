@@ -1,19 +1,45 @@
 # Deploy INSTAYT backend on AWS
 
-This guide assumes you containerize the API with the repo **`Dockerfile`** and run it on **Amazon ECS on Fargate** behind an **Application Load Balancer**. That pattern fits this stack: Express on HTTP plus **Socket.IO** on the same port.
+Two supported approaches:
 
-## What you need in AWS
+| Approach | Best when |
+|----------|-----------|
+| **[Elastic Beanstalk](elastic-beanstalk.md)** — zip upload or `eb deploy` | You want **direct code upload**: no Docker, no ECR. AWS runs `npm install` + `npm start`. |
+| **ECS Fargate + Docker** (below) | You want **containers**, identical images, or larger-scale rollouts. |
+
+---
+
+## Elastic Beanstalk (simplest: upload code)
+
+Step-by-step: **[elastic-beanstalk.md](elastic-beanstalk.md)**  
+
+Quick zip (from `backend/`):
+
+```bash
+zip -r ../instayt-backend-eb.zip . \
+  -x "node_modules/*" -x ".git/*" -x ".env" -x "*.md"
+```
+
+Then **Elastic Beanstalk → Create environment → Upload** that zip. Set env vars in **Configuration → Software**; health check path **`/api/v1/health`** if you use a load balancer.
+
+---
+
+## ECS Fargate + Docker (optional)
+
+This path uses the repo **`Dockerfile`** and **Amazon ECR** + **ECS on Fargate** behind an **Application Load Balancer**. Fits Express + **Socket.IO** on the same port.
+
+### What you need in AWS
 
 | Piece | Role |
 |--------|------|
-| **MongoDB** | [MongoDB Atlas](https://www.mongodb.com/atlas) on AWS, or **Amazon DocumentDB** (Mongo-compatible). Set `MONGODB_URI`. |
-| **Secrets** | **AWS Secrets Manager** (or SSM Parameter Store) for `JWT_*`, `MONGODB_URI`, `CLOUDINARY_*`. Never commit real `.env` values. |
+| **MongoDB** | [MongoDB Atlas](https://www.mongodb.com/atlas) on AWS, or **Amazon DocumentDB**. Set `MONGODB_URI`. |
+| **Secrets** | **AWS Secrets Manager** (or SSM) for `JWT_*`, `MONGODB_URI`, `CLOUDINARY_*`. Never commit real `.env` values. |
 | **ECR** | Store the Docker image. |
 | **ECS Fargate** | Run the container; map container port **3000** (or your `PORT`) to the target group. |
-| **ALB** | Public HTTPS; health check **`GET /api/v1/health`** (HTTP 200). |
-| **CloudWatch Logs** | ECS task log driver → `/ecs/instayt-api` (or similar). |
+| **ALB** | Public HTTPS; health check **`GET /api/v1/health`**. |
+| **CloudWatch Logs** | ECS task log driver. |
 
-## 1. Local image check
+### 1. Local image check
 
 From `backend/`:
 
@@ -26,11 +52,9 @@ docker run --rm -p 3000:3000 \
   instayt-api:local
 ```
 
-Visit `http://localhost:3000/api/v1/health`. Adjust `MONGODB_URI` if your DB is not on the host.
+Visit `http://localhost:3000/api/v1/health`.
 
-## 2. Push image to ECR
-
-Set region and repo name if you like, then run:
+### 2. Push image to ECR
 
 ```bash
 export AWS_REGION=us-east-1
@@ -40,48 +64,23 @@ chmod +x deploy/aws/build-and-push.sh
 ./deploy/aws/build-and-push.sh
 ```
 
-Note the printed image URI (for the ECS task definition).
+### 3. Environment variables (production)
 
-## 3. Environment variables (production)
+Mirror **`backend/.env.example`**. Required at minimum: `NODE_ENV`, `PORT` (match container/target), `MONGODB_URI`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `CORS_ORIGIN`, and Cloudinary keys if you use uploads.
 
-Mirror **`backend/.env.example`**. Required at minimum:
+### 4. Load balancer and WebSockets
 
-- `NODE_ENV=production`
-- `PORT=3000` (must match the container port in ECS and the target group)
-- `MONGODB_URI`
-- `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
-- `CORS_ORIGIN` — set to your **mobile app / web origin** (not `*` if you use credentials)
-- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` — uploads stay disabled until these are set
+- Health check path: **`/api/v1/health`**
+- Raise ALB **idle timeout** if Socket.IO drops (e.g. 300s).
+- **Multiple tasks:** sticky sessions or Redis adapter for Socket.IO; **one task** is simplest to start.
 
-In the ECS task definition, map each key from a secret JSON in Secrets Manager, or use `secrets` with `valueFrom` ARNs.
+### 5. TLS
 
-## 4. Load balancer and WebSockets
+Terminate TLS on the ALB with **ACM** in the same region.
 
-- **Health check path:** `/api/v1/health`
-- **Idle timeout:** ALB default is **60s**; long-lived Socket.IO connections may benefit from a higher idle timeout (e.g. 300s) or keepalives from the client.
-- **Multiple tasks:** If you scale to more than one Fargate task, enable **sticky sessions (session affinity)** on the target group **or** adopt a **Redis**-backed Socket.IO adapter so events work across instances. For the first production cut, a **single task** is the simplest.
+### 6. Optional
 
-## 5. TLS
+- **CI/CD:** CodePipeline + CodeBuild with `docker build` / ECR push.
+- **Seed:** run `npm run seed` locally against prod DB, or a one-off task (Docker image excludes `scripts/` by default — see `elastic-beanstalk.md`).
 
-Terminate TLS on the ALB with an **ACM certificate** in the same region. The container listens on HTTP only.
-
-## 6. Optional next steps
-
-- **CI/CD:** AWS CodePipeline + CodeBuild using the same `docker build` / ECR push pattern.
-- **Migrations / seed:** Run `npm run seed` from a developer machine or a **one-off ECS task** with the same image and a task override that runs `node src/scripts/seed.js` (you would need `scripts/` in the image—currently omitted by `.dockerignore` for a smaller API image).
-- **App Runner:** Possible for HTTP-only APIs; WebSocket support and tuning are more limited than ECS + ALB—prefer ECS for this backend.
-
-## Reference commands (ECS CLI outline)
-
-Exact cluster/service names are yours to choose:
-
-```bash
-aws ecs create-cluster --cluster-name instayt-prod
-# Register a task definition JSON (image URI + secrets + portMappings)
-aws ecs register-task-definition --cli-input-json file://task-definition.json
-aws ecs create-service --cluster instayt-prod --service-name instayt-api \
-  --task-definition instayt-api:1 --desired-count 1 --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-aaa],securityGroups=[sg-aaa],assignPublicIp=ENABLED}"
-```
-
-Use the console **Create service** wizard the first time; it wires VPC, subnets, security groups, and the ALB target group with fewer mistakes than raw CLI.
+Use the ECS **Create service** console wizard the first time.
